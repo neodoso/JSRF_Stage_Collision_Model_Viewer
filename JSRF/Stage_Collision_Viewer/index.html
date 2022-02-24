@@ -317,42 +317,7 @@
 				document.addEventListener( 'keydown', onKeyDown );
 				document.addEventListener( 'keyup', onKeyUp );
 
-				/*
-				const onProgress = function ( xhr ) 
-				{
-					if ( xhr.lengthComputable ) 
-					{
-						const percentComplete = xhr.loaded / xhr.total * 100;
-						console.log( Math.round( percentComplete, 2 ) + '% downloaded' );
-					}
-				};
-
-				new MTLLoader()
-					.setPath( 'models/' )
-					.load( 'Stg' + stage_num + '.mtl', function ( materials ) 
-					{
-
-						materials.preload();
-
-						new OBJLoader()
-							.setMaterials( materials )
-							.setPath( 'models/' )
-							.load( 'Stg' + stage_num + '.obj', function ( object ) 
-							{
-
-								object.position.y = - 95;
-								scene.add( object );
-
-							},
-							 onProgress );
-
-					} );
-				
-				*/
-
-
-				
-
+				// material for the collision mesh
 				var mesh_material = new THREE.MeshPhongMaterial( 
 				{
 					color: 0x888888,
