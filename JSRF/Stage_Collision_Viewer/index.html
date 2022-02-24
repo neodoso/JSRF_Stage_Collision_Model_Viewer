@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>JSRF Stage Collision Model Viewer</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<script src="./models/Stg_spawn_coords.js"></script>
+		<script src="./models/Stg_planes.js"></script>
+		<script src="./models/Stg_check_planes.js"></script>
+		<script src="./models/Stg_check_1_planes.js"></script>
+	</head>
+		<body>
+		
+	<div id="blocker">
+		<div id="instructions">
+			<p>
+				<div id="load_percent"></div>
+				Click to move around
+			</p>
+		</div>
+	</div>
+	<div id="dropdown">
+			<select id="selected_stage" onchange="getComboValue(this)">
+				<option value="00">Garage</option>
+				<option value="10">Shibuya Terminal</option>
+				<option value="11">Chuo Street</option>
+				<option value="12">Dogenzaka Hill</option>
+				<option value="13">Hikage Street</option>
+				<option value="20">Rokkaku-dai Heights</option>
+				<option value="21">Tokyo Underground Sewage Facility</option>
+				<option value="22">Kibogaoka Hill</option>
+				<option value="23">Bottom Point of Sewage Facility</option>
+				<option value="24">Fortified Residential Zone</option>
+				<option value="30">99th Street</option>
+				<option value="31">Sky Dinosaurian Square</option>
+				<option value="32">Future Site of Rokkaku Expo Stadium</option>
+				<option value="33">Highway Zero</option>
+				<option value="34">Skyscraper District and Pharaoh Park</option>
+				<option value="40">Gouji's Tower</option>
+				<option value="41">Tokyo Line</option>
+			</select>
+		</form>
+	</div> 
+	 <div id="info">
+		[WASD : <b>move</b>]   [Space | Q : <b>up</b> | <b>down</b>]   [Shift : <b>Speed Up</b>]   [+ - : <b>Speed</b>] [Camera Speed : <b><a class="SpeedMeter">1</a></b>]	[Planes : <b>P</b>]	
+	</div>
+		
+	<div id="cam_coords">
+	 <p id="coords"></p>
+	</div>
+
+		<script type="importmap">
+		{
+			"imports": 
+			{
+				"three": "../JSRF/Stage_Collision_Viewer/build/three.module.js"
+			}
+		}
+		</script>
+
+		<script type="application/javascript">
+			// if a level has been selected in the dropbox
+			function getComboValue(selectObject) 
+			{
+			 // set Stage ID in window to recover it after reloading the page
+			  var value = selectObject.value.toString();  
+			  window.location = '?StgId=' + value;
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from '../Stage_Collision_Viewer/build/three.module.js';		
+			import { OBJLoader } from './jsm/loaders/OBJLoader.js';
+			import { MTLLoader } from './jsm/loaders/MTLLoader.js';
+			import { PointerLockControls } from './jsm/controls/PointerLockControls.js';
+			import { EffectComposer } from './jsm/postprocessing/EffectComposer.js';
+			import { RenderPass } from './jsm/postprocessing/RenderPass.js';
+			
+			// get the Stage ID from the browser's url
+			var stage_num = new URLSearchParams(window.location.search).get('StgId');
+			// if ?StgId is null, set url end to '?StgId=00' and  set the stage_num to "00"
+			if(stage_num == null) { window.location = '?StgId=00'; stage_num = "00"; }
+			
+			// set level number
+			document.getElementById('selected_stage').value = stage_num;
+
+			const MARGIN = 0;
+			let SCREEN_HEIGHT = window.innerHeight - MARGIN * 2;
+			let SCREEN_WIDTH = window.innerWidth;
+				
+			let camera, controls, scene, renderer;
+			let geometry;
+			let lightA, lightB, lightC, lightD, lightTop, lightBottom;
+
+			let composer;
+			
+			let moveForward = false;
+			let moveBackward = false;
+			let moveLeft = false;
+			let moveRight = false;
+			let pressingSpace = false;
+			let pressingQ = false;
+		
+			let xSpeed = 150;
+			let ySpeed = 300;
+			let zSpeed = 150;
+			let shiftSpeed = 1;
+			let speed = 1;
+		
+			let prevTime = performance.now();
+			const velocity = new THREE.Vector3();
+			const direction = new THREE.Vector3();
+			const vertex = new THREE.Vector3();
+			const color = new THREE.Color();
+			
+			const clock = new THREE.Clock();
+			
+			var planes_cycle = 0;
+			
+			var SpeedMeterTxt = document.getElementsByClassName('SpeedMeter')[0];
+
+			document.addEventListener('keydown', event => 
+			{
+			    if ( event.code == 'NumpadAdd') 
+			    {
+					SpeedMeterSet(1);
+					return;
+				} 
+				else if ( event.code == 'NumpadSubtract')
+				{
+					SpeedMeterSet(-1);
+					return;
+			  	}
+			});
+
+			// increase/decrease speed number
+			function SpeedMeterSet(number_) 
+			{
+				var num = parseInt(parseInt(SpeedMeterTxt.innerText) +  parseInt(number_));
+				if(num == '0') 
+				{ 
+					return; 
+				} 
+				else 
+				{
+					SpeedMeterTxt.innerText = num;
+					speed = num;
+				}
+			}
+			
+
+			init();
+			animate();
+
+			// INITIALIZE
+			function init() 
+			{
+				// disable cache so OBJ model changes reload
+				THREE.Cache.enabled = true;
+				
+				camera = new THREE.PerspectiveCamera( 70, SCREEN_WIDTH / SCREEN_HEIGHT, 1, 1e7 );
+				scene = new THREE.Scene();
+
+				//scene.fog = new THREE.FogExp2( 0x000000, 0.001 );
+
+				lightA = new THREE.DirectionalLight( 0xcccccc );
+				lightA.position.set( 0, 1, 5).normalize();
+				scene.add( lightA );
+				
+				lightB = new THREE.DirectionalLight( 0xcccccc );
+				lightB.position.set(0, 1, -5).normalize();	
+				scene.add( lightB );
+				
+				lightC = new THREE.DirectionalLight( 0xcccccc );
+				lightC.position.set(-5, 1, 0).normalize();	
+				scene.add( lightC );		
+
+				lightD = new THREE.DirectionalLight( 0xcccccc );
+				lightD.position.set(5, 1, 0).normalize();	
+				scene.add( lightD );		
+
+				lightTop = new THREE.DirectionalLight( 0x888888 );
+				lightTop.position.set(0, 5, 0).normalize();	
+				scene.add( lightTop );
+				
+				lightBottom = new THREE.DirectionalLight( 0x888888 );
+				lightBottom.position.set(0, -5, 0).normalize();	
+				scene.add( lightBottom );
+				
+					
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( SCREEN_WIDTH, SCREEN_HEIGHT );
+				document.body.appendChild( renderer.domElement );
+				
+				controls = new PointerLockControls( camera, renderer.domElement );
+
+				const blocker = document.getElementById( 'blocker' );
+				const instructions = document.getElementById( 'instructions' );
+
+
+				instructions.addEventListener( 'click', function () 
+				{
+					controls.lock();
+				});
+
+				controls.addEventListener( 'lock', function () 
+				{
+					instructions.style.display = 'none';
+					blocker.style.display = 'none';
+				});
+
+				controls.addEventListener( 'unlock', function () 
+				{
+					blocker.style.display = 'block';
+					instructions.style.display = '';
+					
+					// save current camera position and rotation to querystring
+					window.history.pushState("", "", 
+					`?StgId=${new URLSearchParams(window.location.search).get('StgId')}`+
+					`&x=${-Math.floor(camera.position.x)}&y=${Math.floor(camera.position.y)}&z=${Math.floor(camera.position.z)}`+
+					`&rx=${Math.floor(camera.rotation.x/Math.PI*180)}&ry=${Math.floor(camera.rotation.y/Math.PI*180)}&rz=${Math.floor(camera.rotation.z/Math.PI*180)}`);
+				});
+
+				scene.add( controls.getObject());
+
+				const onKeyDown = function ( event )
+				{
+					switch ( event.code ) 
+					{
+						case 'ArrowUp':
+						case 'KeyW':
+							moveForward = true;
+							break;
+
+						case 'ArrowLeft':
+						case 'KeyA':
+							moveLeft = true;
+							break;
+
+						case 'ArrowDown':
+						case 'KeyS':
+							moveBackward = true;
+							break;
+
+						case 'ArrowRight':
+						case 'KeyD':
+							moveRight = true;
+							break;
+
+						case 'Space':
+							velocity.y = ySpeed;
+							pressingSpace = true;
+							
+							break;
+						case 'KeyQ':
+							velocity.y = -ySpeed;
+							pressingQ = true;
+							break;
+							
+						case 'ShiftLeft':
+							shiftSpeed = 5;
+							break;
+							
+						case 'KeyP':
+							toggle_planes();
+							break;
+
+						case 'KeyO':
+							toggle_check_planes();
+							break;
+					}
+
+				};
+
+				const onKeyUp = function ( event ) 
+				{
+					switch ( event.code ) 
+					{
+						case 'ArrowUp':
+						case 'KeyW':
+							moveForward = false;
+							break;
+
+						case 'ArrowLeft':
+						case 'KeyA':
+							moveLeft = false;
+							break;
+
+						case 'ArrowDown':
+						case 'KeyS':
+							moveBackward = false;
+							break;
+
+						case 'ArrowRight':
+						case 'KeyD':
+							moveRight = false;
+							break;
+							
+						case 'Space':
+							velocity.y = 0;	
+							pressingSpace = false;
+							break;
+
+						case 'KeyQ':
+							velocity.y = 0;
+							pressingQ = false;
+							break;
+							
+						case 'ShiftLeft':
+							shiftSpeed = 1;
+							break;	break;
+					}
+				};
+
+				document.addEventListener( 'keydown', onKeyDown );
+				document.addEventListener( 'keyup', onKeyUp );
+
+				/*
+				const onProgress = function ( xhr ) 
+				{
+					if ( xhr.lengthComputable ) 
+					{
+						const percentComplete = xhr.loaded / xhr.total * 100;
+						console.log( Math.round( percentComplete, 2 ) + '% downloaded' );
+					}
+				};
+
+				new MTLLoader()
+					.setPath( 'models/' )
+					.load( 'Stg' + stage_num + '.mtl', function ( materials ) 
+					{
+
+						materials.preload();
+
+						new OBJLoader()
+							.setMaterials( materials )
+							.setPath( 'models/' )
+							.load( 'Stg' + stage_num + '.obj', function ( object ) 
+							{
+
+								object.position.y = - 95;
+								scene.add( object );
+
+							},
+							 onProgress );
+
+					} );
+				
+				*/
+
+
+				
+
+				var mesh_material = new THREE.MeshPhongMaterial( 
+				{
+					color: 0x888888,
+					specular: 0x0a0a0a,
+					shininess: 23,
+					polygonOffset: true,
+					polygonOffsetFactor: 1, // positive value pushes polygon further away
+					polygonOffsetUnits: 1
+				});
+
+				// load model
+				var loader = new OBJLoader();
+				loader.load( 'models/Stg' + stage_num + '.obj',
+					function( obj ){
+						obj.traverse( function( child ) 
+						{
+							if ( child instanceof THREE.Mesh ) 
+							{
+								child.material = mesh_material;
+								
+								// wireframe
+								var geo = new THREE.EdgesGeometry( child.geometry ); // or WireframeGeometry
+								var mat = new THREE.LineBasicMaterial( { color: 0x444444 } );
+								var wireframe = new THREE.LineSegments( geo, mat );
+								child.add( wireframe );
+							}
+						});
+						scene.add( obj );
+					},
+					function( xhr ){
+			
+				
+						document.getElementById("load_percent").innerHTML = (xhr.loaded /xhr.total * 100).toFixed(0) + "% loaded";
+						console.log( (xhr.loaded /xhr.total * 100) + "% loaded");
+					},
+					function( err ){
+						console.error( 'Error loading: Stg' + stage_num + '.obj');
+					}
+				);
+				
+						
+				window.addEventListener( 'resize', onWindowResize );
+
+				// postprocessing
+				const renderModel = new RenderPass( scene, camera );
+				composer = new EffectComposer( renderer );
+				composer.addPass( renderModel );
+						
+				// get camera position from Stg_spawn_coords[] (Stg_spawn_coords.js)
+                let pos = Stg_spawn_coords[stage_num].split(' ');
+				camera.updateMatrixWorld();
+				
+				// set camera position 
+				camera.position.x = parseFloat(pos[0]);// parseFloat(pos[0]) * -1;
+				camera.position.y = parseFloat(pos[1]);
+				camera.position.z = parseFloat(pos[2]);
+				
+				// set camera position and rotation from querystring
+				let x = -parseFloat(new URLSearchParams(window.location.search).get('x'));
+				let y = parseFloat(new URLSearchParams(window.location.search).get('y'));
+				let z = parseFloat(new URLSearchParams(window.location.search).get('z'));
+				let rx = parseFloat(new URLSearchParams(window.location.search).get('rx'))*Math.PI/180.0;
+				let ry = parseFloat(new URLSearchParams(window.location.search).get('ry'))*Math.PI/180.0;
+				let rz = parseFloat(new URLSearchParams(window.location.search).get('rz'))*Math.PI/180.0;
+				if (!isNaN(x)) camera.position.x=x;
+				if (!isNaN(y)) camera.position.y=y;
+				if (!isNaN(z)) camera.position.z=z;
+				if (!isNaN(rx)) camera.rotation.x=rx;
+				if (!isNaN(ry)) camera.rotation.y=ry;
+				if (!isNaN(rz)) camera.rotation.z=rz;
+
+				//controls.update();
+				//camera.lookAt(new THREE.Vector3(0,0,0)); 
+				//camera.updateMatrixWorld();
+							
+				//console.log("cam pos: " + camera.position.x + "  " +  camera.position.y + "  " + + camera.position.z  )
+				
+			}
+
+			var planes;
+			
+			function toggle_planes()
+			{
+				//if(planes_cycle == -1) { return; }
+				if(planes_cycle == 3 ) { remove_planes(); planes_cycle = -1;}
+				
+				planes = load_planes(stage_num, planes_cycle);
+				planes_cycle++;
+			}
+
+
+			function load_planes(Stg_num, planes_type)
+			{
+				var planes_data;
+
+				if(planes_type == -1) {  return; }
+
+				
+				switch (planes_type) 
+					{
+						case 0:
+							planes_data = window["Stg" + Stg_num + "_planes"];
+							break;
+
+						case 1:
+							planes_data = window["Stg" + Stg_num + "_check_planes"];
+							break;
+
+						case 2:
+							planes_data = window["Stg" + Stg_num + "_check_1_planes"];
+							break;
+				}
+
+				remove_planes();
+
+				if (typeof planes_data == 'undefined')
+				{
+					return;
+				}
+
+				let p; var planes_count;
+				let planes_objs = [];
+
+				// get number of planes
+				planes_count = Object.keys(planes_data).length;
+				
+				// for each death plane
+				for(var i = 0; i < planes_count; i++)
+				{				
+					p = planes_data[i].split(' ');
+					planes_objs.push(generate_plane(p[0], p[1], p[2], p[3],  p[4], p[5], p[6],  p[7], p[8], p[9],  p[10], p[11]));
+					planes_objs[planes_objs.length-1].visible = true;
+					scene.add(planes_objs[planes_objs.length-1]);
+				}
+
+				return planes_objs;
+			}
+
+			function remove_planes()
+			{
+				if (typeof planes !== 'undefined')
+				{
+					for (var j = 0; j < planes.length; j++)
+					{
+						scene.remove( planes[j] );
+					}
+				}
+			}
+
+			function onWindowResize() 
+			{
+				SCREEN_HEIGHT = window.innerHeight;
+				SCREEN_WIDTH = window.innerWidth;
+
+				camera.aspect = SCREEN_WIDTH / SCREEN_HEIGHT;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( SCREEN_WIDTH, SCREEN_HEIGHT );
+				composer.setSize( SCREEN_WIDTH, SCREEN_HEIGHT );
+			}
+			
+			
+			function animate() 
+			{
+				requestAnimationFrame( animate );
+				
+				const time = performance.now();
+
+				if ( controls.isLocked === true ) 
+				{
+					const delta = ( time - prevTime ) / 1000;
+
+					velocity.x -= velocity.x * 10.0 * delta;
+					velocity.z -= velocity.z * 10.0 * delta;	
+
+					controls.getObject().position.y += ( velocity.y * delta ) * shiftSpeed;
+						
+					if( pressingQ )
+					{
+					  velocity.y = Math.max( velocity.y, -ySpeed * (shiftSpeed) * speed);
+					}		
+
+					direction.z = Number( moveForward ) - Number( moveBackward );
+					direction.x = Number( moveRight ) - Number( moveLeft );
+					direction.normalize(); // this ensures consistent movements in all directions
+
+					if ( moveForward || moveBackward ) velocity.z -= direction.z * 10.0 * delta * zSpeed * shiftSpeed * speed;
+					if ( moveLeft || moveRight ) velocity.x -= direction.x * 10.0 * delta * xSpeed * shiftSpeed* speed;
+
+					controls.moveRight( - velocity.x * delta );
+					controls.moveForward( - velocity.z * delta );
+				}
+						
+				camera.updateMatrixWorld();
+				// display camera coordinates
+				document.getElementById('coords').innerText = "Camera position: " + (Number(camera.position.x *-1)).toFixed(0) + " " + (Number(camera.position.y)).toFixed(0) + " " + (Number(camera.position.z)).toFixed(0);
+				
+				prevTime = time;
+				render();
+			}
+
+			function render() 
+			{
+				const delta = clock.getDelta();
+				composer.render( delta );
+			}
+			
+			function disposeArray() 
+			{
+				this.array = null;
+			}
+			
+			function executeFunctionByName(functionName, context /*, args */) 
+			{
+				var args = Array.prototype.slice.call(arguments, 2);
+				var namespaces = functionName.split(".");
+				var func = namespaces.pop();
+				for (var i = 0; i < namespaces.length; i++) 
+				{
+					context = context[namespaces[i]];
+				}
+				return context[func].apply(context, args);
+			}
+			
+			
+			function getRandomColor() 
+			{
+				var letters = '0123456789ABCDEF';
+				var color = '#';
+				for (var i = 0; i < 6; i++) 
+				{
+					color += letters[Math.floor(Math.random() * 16)];
+				}
+				return color;
+			}
+			
+			function generate_plane(x1,y1,z1, x2,y2,z2, x3,y3,z3, x4,y4,z4)
+			{
+				var geometry = new THREE.BufferGeometry();
+				const positions = [];
+				
+				positions.push( x1*-1, y1, z1 ); 
+				positions.push( x2*-1, y2, z2 );
+				positions.push( x3*-1, y3, z3 );
+				
+				positions.push( x3*-1, y3, z3 );
+				positions.push( x1*-1, y1, z1 );
+				positions.push( x4*-1, y4, z4 );
+				
+				geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( positions, 3 ).onUpload( disposeArray ) );
+				geometry.computeBoundingSphere();
+				
+				const material = new THREE.MeshBasicMaterial( { color: getRandomColor(), side: THREE.DoubleSide, transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending  } );
+				
+				return new THREE.Mesh( geometry, material );			
+			}
+		</script>
+	</body>
+</html>
